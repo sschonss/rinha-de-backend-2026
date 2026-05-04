@@ -59,7 +59,8 @@ $server->on('request', function (Swoole\Http\Request $req, Swoole\Http\Response 
             }
             $result = FraudDetector::score($data);
             $res->header('Content-Type', 'application/json');
-            $res->end(json_encode($result));
+            $approved = $result['approved'] ? 'true' : 'false';
+            $res->end('{"approved":' . $approved . ',"fraud_score":' . $result['fraud_score'] . '}');
         } catch (\Throwable $e) {
             // Any error — fallback to avoid HTTP 500 (weight=5 in scoring)
             $res->header('Content-Type', 'application/json');

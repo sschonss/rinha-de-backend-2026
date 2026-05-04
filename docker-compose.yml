@@ -27,7 +27,7 @@ services:
     environment:
       - INDEX_DIR=/data/index
       - LIB_PATH=/app/src/libvector.so
-      - NPROBE=10
+      - NPROBE=5
       - WORKERS=2
     deploy:
       resources:
@@ -46,7 +46,7 @@ services:
     environment:
       - INDEX_DIR=/data/index
       - LIB_PATH=/app/src/libvector.so
-      - NPROBE=10
+      - NPROBE=5
       - WORKERS=2
     deploy:
       resources:

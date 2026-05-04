@@ -73,7 +73,7 @@ class FraudDetector
             self::clamp($cust['tx_count_24h'] / self::MAX_TX_COUNT_24H),
             $term['is_online'] ? 1.0 : 0.0,
             $term['card_present'] ? 1.0 : 0.0,
-            in_array($merch['id'], $cust['known_merchants']) ? 0.0 : 1.0,
+            isset(array_flip($cust['known_merchants'])[$merch['id']]) ? 0.0 : 1.0,
             self::MCC_RISK[$merch['mcc']] ?? 0.5,
             self::clamp($merch['avg_amount'] / self::MAX_MERCHANT_AVG),
         ];

@@ -6,3 +6,4 @@ resources/example-references.json
 __pycache__/
 .DS_Store
 vendor/
+test/

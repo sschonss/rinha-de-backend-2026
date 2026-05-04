@@ -36,7 +36,7 @@ static void *mmap_file(const char *path, size_t *out_size) {
     void *ptr = mmap(NULL, *out_size, PROT_READ, MAP_PRIVATE, fd, 0);
     close(fd);
     if (ptr == MAP_FAILED) { perror("mmap"); return NULL; }
-    madvise(ptr, *out_size, MADV_SEQUENTIAL);
+    madvise(ptr, *out_size, MADV_RANDOM);
     return ptr;
 }
 
