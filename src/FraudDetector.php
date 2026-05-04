@@ -1,15 +1,15 @@
 <?php
-date_default_timezone_set('UTC');
 
 class FraudDetector
 {
-    const MAX_AMOUNT = 10000;
-    const MAX_INSTALLMENTS = 12;
-    const AMOUNT_VS_AVG_RATIO = 10;
-    const MAX_MINUTES = 1440;
-    const MAX_KM = 1000;
-    const MAX_TX_COUNT_24H = 20;
-    const MAX_MERCHANT_AVG = 10000;
+    const RESPONSES = [
+        0 => '{"approved":true,"fraud_score":0}',
+        1 => '{"approved":true,"fraud_score":0.2}',
+        2 => '{"approved":true,"fraud_score":0.4}',
+        3 => '{"approved":false,"fraud_score":0.6}',
+        4 => '{"approved":false,"fraud_score":0.8}',
+        5 => '{"approved":false,"fraud_score":1}',
+    ];
 
     const MCC_RISK = [
         '5411' => 0.15, '5812' => 0.30, '5912' => 0.20,
@@ -18,16 +18,23 @@ class FraudDetector
         '5999' => 0.50,
     ];
 
+    /**
+     * Returns pre-built JSON response string directly (avoids array alloc + json_encode)
+     */
+    public static function scoreToJson(array $data): string
+    {
+        $vector = self::vectorize($data);
+        $labels = VectorSearch::query($vector);
+        $fraudCount = $labels[0] + $labels[1] + $labels[2] + $labels[3] + $labels[4];
+        return self::RESPONSES[$fraudCount];
+    }
+
     public static function score(array $data): array
     {
         $vector = self::vectorize($data);
         $labels = VectorSearch::query($vector);
-        $fraudCount = 0;
-        for ($i = 0; $i < 5; $i++) {
-            $fraudCount += $labels[$i];
-        }
+        $fraudCount = $labels[0] + $labels[1] + $labels[2] + $labels[3] + $labels[4];
         $fraudScore = $fraudCount / 5.0;
-
         return [
             'approved' => $fraudScore < 0.6,
             'fraud_score' => $fraudScore,
@@ -43,44 +50,56 @@ class FraudDetector
         $last = $d['last_transaction'];
 
         $ts = strtotime($tx['requested_at']);
-        $hour = (int) gmdate('G', $ts);
-        $dow = ((int) gmdate('N', $ts)) - 1; // Mon=0, Sun=6
+        $hour = (int)gmdate('G', $ts);
+        $dow = ((int)gmdate('N', $ts)) - 1;
 
         $avgAmount = $cust['avg_amount'];
         $amountVsAvg = ($avgAmount > 0)
-            ? ($tx['amount'] / $avgAmount) / self::AMOUNT_VS_AVG_RATIO
+            ? $tx['amount'] / ($avgAmount * 10.0)
             : 1.0;
 
         if ($last !== null) {
             $lastTs = strtotime($last['timestamp']);
             $minutes = ($ts - $lastTs) / 60.0;
-            $minutesSinceLast = self::clamp($minutes / self::MAX_MINUTES);
-            $kmFromLast = self::clamp($last['km_from_current'] / self::MAX_KM);
+            $v = $minutes / 1440.0;
+            $minutesSinceLast = $v < 0.0 ? 0.0 : ($v > 1.0 ? 1.0 : $v);
+            $v = $last['km_from_current'] / 1000.0;
+            $kmFromLast = $v < 0.0 ? 0.0 : ($v > 1.0 ? 1.0 : $v);
         } else {
             $minutesSinceLast = -1.0;
             $kmFromLast = -1.0;
         }
 
+        $v = $tx['amount'] / 10000.0;
+        $d0 = $v < 0.0 ? 0.0 : ($v > 1.0 ? 1.0 : $v);
+        $v = $tx['installments'] / 12.0;
+        $d1 = $v < 0.0 ? 0.0 : ($v > 1.0 ? 1.0 : $v);
+        $v = $amountVsAvg;
+        $d2 = $v < 0.0 ? 0.0 : ($v > 1.0 ? 1.0 : $v);
+        $v = $term['km_from_home'] / 1000.0;
+        $d7 = $v < 0.0 ? 0.0 : ($v > 1.0 ? 1.0 : $v);
+        $v = $cust['tx_count_24h'] / 20.0;
+        $d8 = $v < 0.0 ? 0.0 : ($v > 1.0 ? 1.0 : $v);
+        $v = $merch['avg_amount'] / 10000.0;
+        $d13 = $v < 0.0 ? 0.0 : ($v > 1.0 ? 1.0 : $v);
+
+        $unknown = 1.0;
+        $mid = $merch['id'];
+        foreach ($cust['known_merchants'] as $km) {
+            if ($km === $mid) { $unknown = 0.0; break; }
+        }
+
         return [
-            self::clamp($tx['amount'] / self::MAX_AMOUNT),
-            self::clamp($tx['installments'] / self::MAX_INSTALLMENTS),
-            self::clamp($amountVsAvg),
+            $d0, $d1, $d2,
             $hour / 23.0,
             $dow / 6.0,
-            $minutesSinceLast,
-            $kmFromLast,
-            self::clamp($term['km_from_home'] / self::MAX_KM),
-            self::clamp($cust['tx_count_24h'] / self::MAX_TX_COUNT_24H),
+            $minutesSinceLast, $kmFromLast,
+            $d7, $d8,
             $term['is_online'] ? 1.0 : 0.0,
             $term['card_present'] ? 1.0 : 0.0,
-            isset(array_flip($cust['known_merchants'])[$merch['id']]) ? 0.0 : 1.0,
+            $unknown,
             self::MCC_RISK[$merch['mcc']] ?? 0.5,
-            self::clamp($merch['avg_amount'] / self::MAX_MERCHANT_AVG),
+            $d13,
         ];
-    }
-
-    private static function clamp(float $v): float
-    {
-        return max(0.0, min(1.0, $v));
     }
 }

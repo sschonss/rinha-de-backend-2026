@@ -52,15 +52,13 @@ $server->on('request', function (Swoole\Http\Request $req, Swoole\Http\Response 
         try {
             $data = json_decode($req->rawContent(), true);
             if (!$data) {
-                // Malformed JSON — fallback
                 $res->header('Content-Type', 'application/json');
-                $res->end('{"approved":true,"fraud_score":0.0}');
+                $res->end('{"approved":true,"fraud_score":0}');
                 return;
             }
-            $result = FraudDetector::score($data);
+            $json = FraudDetector::scoreToJson($data);
             $res->header('Content-Type', 'application/json');
-            $approved = $result['approved'] ? 'true' : 'false';
-            $res->end('{"approved":' . $approved . ',"fraud_score":' . $result['fraud_score'] . '}');
+            $res->end($json);
         } catch (\Throwable $e) {
             // Any error — fallback to avoid HTTP 500 (weight=5 in scoring)
             $res->header('Content-Type', 'application/json');
