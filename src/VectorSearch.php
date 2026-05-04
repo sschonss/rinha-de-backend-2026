@@ -3,9 +3,6 @@
 class VectorSearch
 {
     private static ?\FFI $ffi = null;
-    private static ?\FFI\CData $queryBuf = null;
-    private static ?\FFI\CData $labelsBuf = null;
-    private static ?\FFI\CData $distsBuf = null;
     private static bool $initialized = false;
 
     public static function init(string $indexDir, string $libPath = null, int $nprobe = 10): void
@@ -18,6 +15,12 @@ class VectorSearch
             int ivf_init(const char *index_dir, int nprobe);
             int ivf_search(const float *query, int *out_labels, float *out_distances, int k);
             void ivf_destroy(void);
+            int ivf_fraud_score(
+                float amount, int installments, float cust_avg,
+                int tx_count_24h, float merch_avg, float mcc_risk,
+                float km_home, int is_online, int card_present,
+                int unknown_merchant, int hour, int dow,
+                int has_last_tx, float minutes_since_last, float km_from_last);
         ", $libPath);
 
         $result = self::$ffi->ivf_init($indexDir, $nprobe);
@@ -25,34 +28,27 @@ class VectorSearch
             throw new \RuntimeException("Failed to initialize IVF index from $indexDir");
         }
 
-        // Pre-allocate buffers to avoid per-request allocation
-        self::$queryBuf = self::$ffi->new("float[14]");
-        self::$labelsBuf = self::$ffi->new("int[5]");
-        self::$distsBuf = self::$ffi->new("float[5]");
         self::$initialized = true;
     }
 
     /**
-     * @param float[] $vector Array of 14 floats
-     * @return int[] Array of 5 labels (0=legit, 1=fraud)
+     * Combined vectorize+search+count in a single FFI call.
+     * Returns fraud_count (0-5).
      */
-    public static function query(array $vector): array
-    {
-        if (!self::$initialized) {
-            throw new \RuntimeException("VectorSearch not initialized. Call init() first.");
-        }
-
-        for ($i = 0; $i < 14; $i++) {
-            self::$queryBuf[$i] = $vector[$i];
-        }
-
-        self::$ffi->ivf_search(self::$queryBuf, self::$labelsBuf, self::$distsBuf, 5);
-
-        $labels = [];
-        for ($i = 0; $i < 5; $i++) {
-            $labels[] = self::$labelsBuf[$i];
-        }
-        return $labels;
+    public static function scoreDirect(
+        float $amount, int $installments, float $custAvg,
+        int $txCount24h, float $merchAvg, float $mccRisk,
+        float $kmHome, int $isOnline, int $cardPresent,
+        int $unknownMerchant, int $hour, int $dow,
+        int $hasLastTx, float $minutesSinceLast, float $kmFromLast
+    ): int {
+        return self::$ffi->ivf_fraud_score(
+            $amount, $installments, $custAvg,
+            $txCount24h, $merchAvg, $mccRisk,
+            $kmHome, $isOnline, $cardPresent,
+            $unknownMerchant, $hour, $dow,
+            $hasLastTx, $minutesSinceLast, $kmFromLast
+        );
     }
 
     public static function destroy(): void

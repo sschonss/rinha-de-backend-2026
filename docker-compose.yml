@@ -28,7 +28,7 @@ services:
       - INDEX_DIR=/data/index
       - LIB_PATH=/app/src/libvector.so
       - NPROBE=5
-      - WORKERS=2
+      - WORKERS=1
     deploy:
       resources:
         limits:
@@ -47,7 +47,7 @@ services:
       - INDEX_DIR=/data/index
       - LIB_PATH=/app/src/libvector.so
       - NPROBE=5
-      - WORKERS=2
+      - WORKERS=1
     deploy:
       resources:
         limits:

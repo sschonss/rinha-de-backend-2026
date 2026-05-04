@@ -19,26 +19,56 @@ class FraudDetector
     ];
 
     /**
-     * Returns pre-built JSON response string directly (avoids array alloc + json_encode)
+     * Single FFI call: PHP extracts fields → C does vectorize+search+count
      */
     public static function scoreToJson(array $data): string
     {
-        $vector = self::vectorize($data);
-        $labels = VectorSearch::query($vector);
-        $fraudCount = $labels[0] + $labels[1] + $labels[2] + $labels[3] + $labels[4];
+        $tx = $data['transaction'];
+        $cust = $data['customer'];
+        $merch = $data['merchant'];
+        $term = $data['terminal'];
+        $last = $data['last_transaction'];
+
+        $ts = strtotime($tx['requested_at']);
+        $hour = (int)gmdate('G', $ts);
+        $dow = ((int)gmdate('N', $ts)) - 1;
+
+        $mccRisk = self::MCC_RISK[$merch['mcc']] ?? 0.5;
+
+        $unknown = 1;
+        $mid = $merch['id'];
+        foreach ($cust['known_merchants'] as $km) {
+            if ($km === $mid) { $unknown = 0; break; }
+        }
+
+        if ($last !== null) {
+            $lastTs = strtotime($last['timestamp']);
+            $minutes = ($ts - $lastTs) / 60.0;
+            $fraudCount = VectorSearch::scoreDirect(
+                $tx['amount'], $tx['installments'], $cust['avg_amount'],
+                $cust['tx_count_24h'], $merch['avg_amount'], $mccRisk,
+                $term['km_from_home'], $term['is_online'] ? 1 : 0, $term['card_present'] ? 1 : 0,
+                $unknown, $hour, $dow,
+                1, (float)$minutes, (float)$last['km_from_current']
+            );
+        } else {
+            $fraudCount = VectorSearch::scoreDirect(
+                $tx['amount'], $tx['installments'], $cust['avg_amount'],
+                $cust['tx_count_24h'], $merch['avg_amount'], $mccRisk,
+                $term['km_from_home'], $term['is_online'] ? 1 : 0, $term['card_present'] ? 1 : 0,
+                $unknown, $hour, $dow,
+                0, 0.0, 0.0
+            );
+        }
+
         return self::RESPONSES[$fraudCount];
     }
 
+    // Keep for unit tests
     public static function score(array $data): array
     {
         $vector = self::vectorize($data);
-        $labels = VectorSearch::query($vector);
-        $fraudCount = $labels[0] + $labels[1] + $labels[2] + $labels[3] + $labels[4];
-        $fraudScore = $fraudCount / 5.0;
-        return [
-            'approved' => $fraudScore < 0.6,
-            'fraud_score' => $fraudScore,
-        ];
+        return ['vector' => $vector];
     }
 
     public static function vectorize(array $d): array
