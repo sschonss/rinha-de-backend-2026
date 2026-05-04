@@ -38,8 +38,9 @@ RUN gcc -O3 -msse2 -shared -fPIC -o libvector.so vector_search.c
 # ============================================================
 FROM phpswoole/swoole:php8.3
 
-# Install FFI (usually already available, but ensure it)
-RUN docker-php-ext-enable ffi 2>/dev/null || true
+# Install dependencies for FFI and compile it
+RUN apt-get update && apt-get install -y libffi-dev && rm -rf /var/lib/apt/lists/*
+RUN docker-php-ext-install ffi
 
 # Set FFI to allow preloading
 RUN echo "ffi.enable=true" >> /usr/local/etc/php/conf.d/ffi.ini
