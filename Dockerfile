@@ -36,7 +36,7 @@ RUN gcc -O3 -march=haswell -mavx2 -ffast-math -funroll-loops -shared -fPIC -o li
 # ============================================================
 # Stage 4: Runtime
 # ============================================================
-FROM phpswoole/swoole:php8.3
+FROM phpswoole/swoole:6.2.0-php8.3
 
 # Install dependencies for FFI and compile it
 RUN apt-get update && apt-get install -y libffi-dev && rm -rf /var/lib/apt/lists/*
