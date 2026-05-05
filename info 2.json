@@ -1,7 +1,0 @@
-{
-    "participants": ["Luiz Schons"],
-    "social": ["https://github.com/luizschons"],
-    "source-code-repo": "https://github.com/luizschons/rinha-de-backend-2026",
-    "stack": ["php", "swoole", "c", "haproxy"],
-    "open_to_work": true
-}
