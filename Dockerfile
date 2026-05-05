@@ -36,7 +36,7 @@ RUN gcc -O3 -march=haswell -mavx2 -ffast-math -funroll-loops -shared -fPIC -o li
 # ============================================================
 # Stage 4: Runtime
 # ============================================================
-FROM phpswoole/swoole:6.2.0-php8.3
+FROM phpswoole/swoole:6.1.8-php8.3
 
 # Install dependencies for FFI and compile it
 RUN apt-get update && apt-get install -y libffi-dev && rm -rf /var/lib/apt/lists/*
@@ -47,9 +47,7 @@ RUN echo "ffi.enable=true" >> /usr/local/etc/php/conf.d/ffi.ini
 
 # Enable opcache bytecode caching (JIT disabled — incompatible with Swoole)
 RUN echo "opcache.enable=1" >> /usr/local/etc/php/conf.d/opcache.ini && \
-    echo "opcache.enable_cli=1" >> /usr/local/etc/php/conf.d/opcache.ini && \
-    echo "opcache.jit=1255" >> /usr/local/etc/php/conf.d/opcache.ini && \
-    echo "opcache.jit_buffer_size=32M" >> /usr/local/etc/php/conf.d/opcache.ini
+    echo "opcache.enable_cli=1" >> /usr/local/etc/php/conf.d/opcache.ini
 
 WORKDIR /app
 
