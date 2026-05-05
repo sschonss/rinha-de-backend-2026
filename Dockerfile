@@ -48,7 +48,8 @@ RUN echo "ffi.enable=true" >> /usr/local/etc/php/conf.d/ffi.ini
 # Enable opcache bytecode caching (JIT disabled — incompatible with Swoole)
 RUN echo "opcache.enable=1" >> /usr/local/etc/php/conf.d/opcache.ini && \
     echo "opcache.enable_cli=1" >> /usr/local/etc/php/conf.d/opcache.ini && \
-    echo "opcache.jit=0" >> /usr/local/etc/php/conf.d/opcache.ini
+    echo "opcache.jit=1255" >> /usr/local/etc/php/conf.d/opcache.ini && \
+    echo "opcache.jit_buffer_size=32M" >> /usr/local/etc/php/conf.d/opcache.ini
 
 WORKDIR /app
 

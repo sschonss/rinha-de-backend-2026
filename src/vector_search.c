@@ -140,7 +140,19 @@ int ivf_init(const char *index_dir, int nprobe) {
     if (!g_idx.offsets) return -1;
     g_idx.mmap_ptrs[g_idx.n_mmaps] = g_idx.offsets; g_idx.mmap_sizes[g_idx.n_mmaps] = sz; g_idx.n_mmaps++;
 
-    fprintf(stderr, "[ivf] index loaded successfully\n");
+    // Pre-warm all mmap pages to avoid page faults during requests
+    fprintf(stderr, "[ivf] pre-warming mmap pages...\n");
+    volatile uint8_t sink = 0;
+    for (int m = 0; m < g_idx.n_mmaps; m++) {
+        uint8_t *p = (uint8_t *)g_idx.mmap_ptrs[m];
+        size_t s = g_idx.mmap_sizes[m];
+        for (size_t off = 0; off < s; off += 4096) {
+            sink ^= p[off];
+        }
+    }
+    (void)sink;
+
+    fprintf(stderr, "[ivf] index loaded and warmed successfully\n");
     return 0;
 }
 
