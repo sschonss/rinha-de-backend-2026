@@ -32,7 +32,7 @@ static void *mmap_file(const char *path, size_t *out_size) {
     struct stat st;
     if (fstat(fd, &st) < 0) { perror("fstat"); close(fd); return NULL; }
     *out_size = (size_t)st.st_size;
-    void *ptr = mmap(NULL, *out_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    void *ptr = mmap(NULL, *out_size, PROT_READ, MAP_PRIVATE | MAP_POPULATE, fd, 0);
     close(fd);
     if (ptr == MAP_FAILED) { perror("mmap"); return NULL; }
     return ptr;
@@ -140,23 +140,7 @@ int ivf_init(const char *index_dir, int nprobe) {
     if (!g_idx.offsets) return -1;
     g_idx.mmap_ptrs[g_idx.n_mmaps] = g_idx.offsets; g_idx.mmap_sizes[g_idx.n_mmaps] = sz; g_idx.n_mmaps++;
 
-    // Pre-warm only small files (centroids + offsets) - 256KB total
-    // vectors.bin (168MB) exceeds container limit, demand-paged is better
-    fprintf(stderr, "[ivf] pre-warming centroids + offsets...\n");
-    volatile uint8_t sink = 0;
-    // Warm centroids (224KB)
-    {
-        uint8_t *p = (uint8_t *)g_idx.centroids;
-        size_t s = g_idx.n_clusters * g_idx.n_dims * sizeof(float);
-        for (size_t off = 0; off < s; off += 4096) sink ^= p[off];
-    }
-    // Warm offsets (32KB)
-    {
-        uint8_t *p = (uint8_t *)g_idx.offsets;
-        size_t s = g_idx.n_clusters * 2 * sizeof(uint32_t);
-        for (size_t off = 0; off < s; off += 4096) sink ^= p[off];
-    }
-    (void)sink;
+    fprintf(stderr, "[ivf] index loaded successfully\n");
 
     fprintf(stderr, "[ivf] index loaded and warmed successfully\n");
     return 0;

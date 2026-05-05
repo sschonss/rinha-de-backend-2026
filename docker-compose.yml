@@ -4,11 +4,9 @@ services:
     ports:
       - "9999:9999"
     volumes:
-      - ./config/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
     depends_on:
-      api-1:
-        condition: service_started
-      api-2:
+      api:
         condition: service_started
     deploy:
       resources:
@@ -18,41 +16,20 @@ services:
     networks:
       - rinha
 
-  api-1:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      platforms:
-        - linux/amd64
+  api:
+    image: sschonss/rinha-api-2026:v6
+    platform: linux/amd64
     environment:
       - INDEX_DIR=/data/index
       - LIB_PATH=/app/src/libvector.so
       - NPROBE=5
-      - WORKERS=1
+      - WORKERS=2
+      - PORT=9999
     deploy:
       resources:
         limits:
-          cpus: "0.475"
-          memory: "162MB"
-    networks:
-      - rinha
-
-  api-2:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      platforms:
-        - linux/amd64
-    environment:
-      - INDEX_DIR=/data/index
-      - LIB_PATH=/app/src/libvector.so
-      - NPROBE=5
-      - WORKERS=1
-    deploy:
-      resources:
-        limits:
-          cpus: "0.475"
-          memory: "162MB"
+          cpus: "0.95"
+          memory: "325MB"
     networks:
       - rinha
 
