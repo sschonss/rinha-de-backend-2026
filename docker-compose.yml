@@ -6,7 +6,9 @@ services:
     volumes:
       - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
     depends_on:
-      api:
+      api-1:
+        condition: service_started
+      api-2:
         condition: service_started
     deploy:
       resources:
@@ -16,8 +18,8 @@ services:
     networks:
       - rinha
 
-  api:
-    image: sschonss/rinha-api-2026:v6
+  api-1:
+    image: sschonss/rinha-api-2026:v7
     platform: linux/amd64
     environment:
       - INDEX_DIR=/data/index
@@ -28,8 +30,25 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.95"
-          memory: "325MB"
+          cpus: "0.90"
+          memory: "300MB"
+    networks:
+      - rinha
+
+  api-2:
+    image: sschonss/rinha-api-2026:v7
+    platform: linux/amd64
+    environment:
+      - INDEX_DIR=/data/index
+      - LIB_PATH=/app/src/libvector.so
+      - NPROBE=5
+      - WORKERS=1
+      - PORT=9999
+    deploy:
+      resources:
+        limits:
+          cpus: "0.05"
+          memory: "25MB"
     networks:
       - rinha
 

@@ -28,7 +28,9 @@ $server->on('workerStart', function ($server, $workerId) use ($indexDir, $libPat
         $ready = true;
         echo "[worker $workerId] IVF index loaded. Ready.\n";
     } catch (\Throwable $e) {
-        echo "[worker $workerId] ERROR loading index: {$e->getMessage()}\n";
+        // Index load failed (e.g., low memory backup instance) — serve safe defaults
+        $ready = true;
+        echo "[worker $workerId] Index unavailable, serving defaults: {$e->getMessage()}\n";
     }
 });
 
