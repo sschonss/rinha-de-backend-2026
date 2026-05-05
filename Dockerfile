@@ -21,7 +21,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY indexer/build_index.py .
 COPY --from=downloader /resources/references.json.gz /resources/
 
-ARG N_CLUSTERS=4000
+ARG N_CLUSTERS=1500
 RUN python build_index.py /resources/references.json.gz /index ${N_CLUSTERS}
 
 # ============================================================
@@ -63,7 +63,7 @@ COPY src/ /app/src/
 # Environment defaults
 ENV INDEX_DIR=/data/index
 ENV LIB_PATH=/app/src/libvector.so
-ENV NPROBE=5
+ENV NPROBE=3
 ENV PORT=9999
 ENV WORKERS=1
 

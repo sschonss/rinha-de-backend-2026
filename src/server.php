@@ -8,9 +8,14 @@ $indexDir = getenv('INDEX_DIR') ?: '/data/index';
 $libPath  = getenv('LIB_PATH') ?: __DIR__ . '/libvector.so';
 $nprobe   = (int)(getenv('NPROBE') ?: 10);
 $port     = (int)(getenv('PORT') ?: 9999);
+$sockPath = getenv('SOCK_PATH') ?: '';
 $workers  = (int)(getenv('WORKERS') ?: 2);
 
-$server = new Swoole\Http\Server('0.0.0.0', $port);
+if ($sockPath) {
+    $server = new Swoole\Http\Server("unix:$sockPath", 0, SWOOLE_PROCESS, SWOOLE_UNIX_STREAM);
+} else {
+    $server = new Swoole\Http\Server('0.0.0.0', $port);
+}
 
 $server->set([
     'worker_num'        => $workers,
@@ -26,10 +31,12 @@ $server->on('workerStart', function ($server, $workerId) use ($indexDir, $libPat
     try {
         VectorSearch::init($indexDir, $libPath, $nprobe);
         $ready = true;
+        @file_put_contents('/tmp/ready', '1');
         echo "[worker $workerId] IVF index loaded. Ready.\n";
     } catch (\Throwable $e) {
         // Index load failed (e.g., low memory backup instance) — serve safe defaults
         $ready = true;
+        @file_put_contents('/tmp/ready', '1');
         echo "[worker $workerId] Index unavailable, serving defaults: {$e->getMessage()}\n";
     }
 });
@@ -73,5 +80,9 @@ $server->on('request', function (Swoole\Http\Request $req, Swoole\Http\Response 
     $res->end();
 });
 
-echo "Starting Swoole server on port $port with $workers workers...\n";
+if ($sockPath) {
+    echo "Starting Swoole server on unix:$sockPath with $workers workers...\n";
+} else {
+    echo "Starting Swoole server on port $port with $workers workers...\n";
+}
 $server->start();

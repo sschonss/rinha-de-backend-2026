@@ -18,11 +18,98 @@ class FraudDetector
         '5999' => 0.50,
     ];
 
+    // Cheap rules thresholds — skip KNN for obvious cases
+    const CHEAP_MIN = 4;   // score < 4 → clearly not fraud
+    const CHEAP_MAX = 17;  // score > 17 → clearly fraud
+
     /**
-     * Single FFI call: PHP extracts fields → C does vectorize+search+count
+     * Cheap rules: count risk signals without KNN.
+     * Returns 0-21 score based on simple threshold checks.
+     */
+    private static function cheapScore(array $data): int
+    {
+        $tx = $data['transaction'];
+        $cust = $data['customer'];
+        $merch = $data['merchant'];
+        $term = $data['terminal'];
+        $last = $data['last_transaction'];
+        $score = 0;
+
+        $amount = $tx['amount'];
+        if ($amount >= 2000) $score++;
+        if ($amount >= 500)  $score++;
+
+        $installments = $tx['installments'];
+        if ($installments >= 6) $score++;
+        if ($installments >= 4) $score++;
+
+        $avgAmount = $cust['avg_amount'];
+        if ($avgAmount > 0) {
+            $ratio = $amount / $avgAmount;
+            if ($ratio >= 8) $score++;
+            if ($ratio >= 1) $score++;
+        }
+
+        $ts = strtotime($tx['requested_at']);
+        $hour = (int)gmdate('G', $ts);
+        if ($hour < 7) $score++;
+        if ($hour < 8 || $hour >= 21) $score++;
+
+        if ($last !== null) {
+            $lastTs = strtotime($last['timestamp']);
+            $mins = abs(($ts - $lastTs) / 60);
+            if ($mins <= 10) $score++;
+            if ($mins <= 30) $score++;
+
+            $lastKm = $last['km_from_current'];
+            if ($lastKm >= 200) $score++;
+            if ($lastKm >= 20) $score++;
+        }
+
+        $kmFromHome = $term['km_from_home'];
+        if ($kmFromHome >= 200) $score++;
+        if ($kmFromHome >= 50) $score++;
+
+        $txCount = $cust['tx_count_24h'];
+        if ($txCount >= 8) $score++;
+        if ($txCount >= 6) $score++;
+
+        if ($term['is_online']) $score++;
+        if (!$term['card_present']) $score++;
+
+        $mid = $merch['id'];
+        $known = false;
+        foreach ($cust['known_merchants'] as $km) {
+            if ($km === $mid) { $known = true; break; }
+        }
+        if (!$known) $score++;
+
+        $mccRisk = self::MCC_RISK[$merch['mcc']] ?? 0.5;
+        if ($mccRisk >= 0.75) $score++;
+        if ($mccRisk >= 0.45) $score++;
+
+        $merchantAvg = $merch['avg_amount'];
+        if ($merchantAvg <= 100) $score++;
+
+        return $score;
+    }
+
+    /**
+     * Single FFI call: PHP extracts fields → C does vectorize+search+count.
+     * With cheap rules: skips KNN for obvious fraud/non-fraud cases.
      */
     public static function scoreToJson(array $data): string
     {
+        // Cheap rules — skip KNN for obvious cases
+        $cheapScore = self::cheapScore($data);
+        if ($cheapScore < self::CHEAP_MIN) {
+            return self::RESPONSES[0]; // clearly not fraud
+        }
+        if ($cheapScore > self::CHEAP_MAX) {
+            return self::RESPONSES[5]; // clearly fraud
+        }
+
+        // Ambiguous — do full KNN search
         $tx = $data['transaction'];
         $cust = $data['customer'];
         $merch = $data['merchant'];

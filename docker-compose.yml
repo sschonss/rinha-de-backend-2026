@@ -1,56 +1,73 @@
+x-api-common: &api-common
+  image: sschonss/rinha-api-2026:v9
+  platform: linux/amd64
+  volumes:
+    - rinha-sockets:/sockets
+  deploy:
+    resources:
+      limits:
+        cpus: "0.40"
+        memory: "150MB"
+  networks:
+    - rinha
+  ulimits:
+    nofile:
+      soft: 65535
+      hard: 65535
+
 services:
   haproxy:
-    image: haproxy:2.9-alpine
+    image: haproxy:3.3
     ports:
       - "9999:9999"
     volumes:
       - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - rinha-sockets:/sockets
     depends_on:
       api-1:
-        condition: service_started
+        condition: service_healthy
       api-2:
-        condition: service_started
+        condition: service_healthy
     deploy:
       resources:
         limits:
-          cpus: "0.05"
-          memory: "25MB"
+          cpus: "0.20"
+          memory: "50MB"
     networks:
       - rinha
 
   api-1:
-    image: sschonss/rinha-api-2026:v8
-    platform: linux/amd64
+    <<: *api-common
     environment:
       - INDEX_DIR=/data/index
       - LIB_PATH=/app/src/libvector.so
-      - NPROBE=5
+      - NPROBE=3
       - WORKERS=1
-      - PORT=9999
-    deploy:
-      resources:
-        limits:
-          cpus: "0.475"
-          memory: "162MB"
-    networks:
-      - rinha
+      - SOCK_PATH=/sockets/api1.sock
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/ready"]
+      interval: 500ms
+      timeout: 1s
+      start_period: 30s
+      retries: 3
 
   api-2:
-    image: sschonss/rinha-api-2026:v8
-    platform: linux/amd64
+    <<: *api-common
     environment:
       - INDEX_DIR=/data/index
       - LIB_PATH=/app/src/libvector.so
-      - NPROBE=5
+      - NPROBE=3
       - WORKERS=1
-      - PORT=9999
-    deploy:
-      resources:
-        limits:
-          cpus: "0.475"
-          memory: "162MB"
-    networks:
-      - rinha
+      - SOCK_PATH=/sockets/api2.sock
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/ready"]
+      interval: 500ms
+      timeout: 1s
+      start_period: 30s
+      retries: 3
+
+volumes:
+  rinha-sockets:
 
 networks:
   rinha:
