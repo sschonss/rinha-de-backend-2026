@@ -19,24 +19,7 @@ services:
       - rinha
 
   api-1:
-    image: sschonss/rinha-api-2026:v7
-    platform: linux/amd64
-    environment:
-      - INDEX_DIR=/data/index
-      - LIB_PATH=/app/src/libvector.so
-      - NPROBE=5
-      - WORKERS=2
-      - PORT=9999
-    deploy:
-      resources:
-        limits:
-          cpus: "0.90"
-          memory: "300MB"
-    networks:
-      - rinha
-
-  api-2:
-    image: sschonss/rinha-api-2026:v7
+    image: sschonss/rinha-api-2026:v8
     platform: linux/amd64
     environment:
       - INDEX_DIR=/data/index
@@ -47,8 +30,25 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.05"
-          memory: "25MB"
+          cpus: "0.475"
+          memory: "162MB"
+    networks:
+      - rinha
+
+  api-2:
+    image: sschonss/rinha-api-2026:v8
+    platform: linux/amd64
+    environment:
+      - INDEX_DIR=/data/index
+      - LIB_PATH=/app/src/libvector.so
+      - NPROBE=5
+      - WORKERS=1
+      - PORT=9999
+    deploy:
+      resources:
+        limits:
+          cpus: "0.475"
+          memory: "162MB"
     networks:
       - rinha
 
