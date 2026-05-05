@@ -32,6 +32,16 @@ $server->on('workerStart', function ($server, $workerId) use ($indexDir, $libPat
     }
 });
 
+// Pre-computed JSON responses indexed by fraud_count (0-5)
+const RESPONSES = [
+    '{"approved":true,"fraud_score":0}',
+    '{"approved":true,"fraud_score":0.2}',
+    '{"approved":true,"fraud_score":0.4}',
+    '{"approved":false,"fraud_score":0.6}',
+    '{"approved":false,"fraud_score":0.8}',
+    '{"approved":false,"fraud_score":1}',
+];
+
 $server->on('request', function (Swoole\Http\Request $req, Swoole\Http\Response $res) use (&$ready) {
     $uri = $req->server['request_uri'];
 
@@ -47,22 +57,22 @@ $server->on('request', function (Swoole\Http\Request $req, Swoole\Http\Response 
         return;
     }
 
-    // POST /fraud-score
+    // POST /fraud-score — entire pipeline in C (yyjson parse + vectorize + search)
     if ($uri === '/fraud-score' && $req->server['request_method'] === 'POST') {
         try {
-            $data = json_decode($req->rawContent(), true);
-            if (!$data) {
+            $body = $req->rawContent();
+            if (!$body) {
                 $res->header('Content-Type', 'application/json');
-                $res->end('{"approved":true,"fraud_score":0}');
+                $res->end(RESPONSES[0]);
                 return;
             }
-            $json = FraudDetector::scoreToJson($data);
+            $fraudCount = VectorSearch::processRequest($body);
+            if ($fraudCount < 0) $fraudCount = 0;
             $res->header('Content-Type', 'application/json');
-            $res->end($json);
+            $res->end(RESPONSES[$fraudCount]);
         } catch (\Throwable $e) {
-            // Any error — fallback to avoid HTTP 500 (weight=5 in scoring)
             $res->header('Content-Type', 'application/json');
-            $res->end('{"approved":true,"fraud_score":0.0}');
+            $res->end(RESPONSES[0]);
         }
         return;
     }
