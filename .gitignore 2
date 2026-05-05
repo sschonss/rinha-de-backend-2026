@@ -1,0 +1,9 @@
+resources/references.json.gz
+resources/example-references.json
+*.o
+*.so
+*.bin
+__pycache__/
+.DS_Store
+vendor/
+test/

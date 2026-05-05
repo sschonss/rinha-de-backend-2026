@@ -30,8 +30,8 @@ RUN python build_index.py /resources/references.json.gz /index ${N_CLUSTERS}
 FROM gcc:13-bookworm AS builder
 
 WORKDIR /build
-COPY src/vector_search.h src/vector_search.c src/yyjson.h src/yyjson.c ./
-RUN gcc -O3 -march=haswell -mavx2 -ffast-math -funroll-loops -shared -fPIC -o libvector.so vector_search.c yyjson.c
+COPY src/vector_search.h src/vector_search.c ./
+RUN gcc -O3 -march=haswell -mavx2 -ffast-math -funroll-loops -shared -fPIC -o libvector.so vector_search.c
 
 # ============================================================
 # Stage 4: Runtime
@@ -45,11 +45,11 @@ RUN docker-php-ext-install ffi
 # Set FFI to allow preloading
 RUN echo "ffi.enable=true" >> /usr/local/etc/php/conf.d/ffi.ini
 
-# Enable opcache (JIT disabled — incompatible with Swoole's opcode handlers)
-RUN echo "opcache.enable=1" >> /usr/local/etc/php/conf.d/opcache-perf.ini && \
-    echo "opcache.enable_cli=1" >> /usr/local/etc/php/conf.d/opcache-perf.ini && \
-    echo "opcache.validate_timestamps=0" >> /usr/local/etc/php/conf.d/opcache-perf.ini && \
-    echo "opcache.save_comments=0" >> /usr/local/etc/php/conf.d/opcache-perf.ini
+# Enable opcache with JIT for maximum PHP performance
+RUN echo "opcache.enable=1" >> /usr/local/etc/php/conf.d/opcache-jit.ini && \
+    echo "opcache.enable_cli=1" >> /usr/local/etc/php/conf.d/opcache-jit.ini && \
+    echo "opcache.jit=1255" >> /usr/local/etc/php/conf.d/opcache-jit.ini && \
+    echo "opcache.jit_buffer_size=32M" >> /usr/local/etc/php/conf.d/opcache-jit.ini
 
 WORKDIR /app
 

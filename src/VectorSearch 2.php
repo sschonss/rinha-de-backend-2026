@@ -21,7 +21,6 @@ class VectorSearch
                 float km_home, int is_online, int card_present,
                 int unknown_merchant, int hour, int dow,
                 int has_last_tx, float minutes_since_last, float km_from_last);
-            int ivf_process_request(const char *json_body, size_t json_len);
         ", $libPath);
 
         $result = self::$ffi->ivf_init($indexDir, $nprobe);
@@ -50,15 +49,6 @@ class VectorSearch
             $unknownMerchant, $hour, $dow,
             $hasLastTx, $minutesSinceLast, $kmFromLast
         );
-    }
-
-    /**
-     * Full pipeline in C: JSON parse + vectorize + search + count.
-     * Returns fraud_count (0-5), or -1 on parse error.
-     */
-    public static function processRequest(string $jsonBody): int
-    {
-        return self::$ffi->ivf_process_request($jsonBody, strlen($jsonBody));
     }
 
     public static function destroy(): void
