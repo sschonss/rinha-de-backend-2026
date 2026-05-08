@@ -41,8 +41,8 @@ services:
     environment:
       - INDEX_PATH=/data/index.bin
       - LIB_PATH=/app/src/libvector.so
-      - FAST_NPROBE=8
-      - FULL_NPROBE=24
+      - FAST_NPROBE=32
+      - FULL_NPROBE=128
       - WORKERS=1
       - SOCK_PATH=/sockets/api1.sock
       - WARMUP=500
@@ -58,8 +58,8 @@ services:
     environment:
       - INDEX_PATH=/data/index.bin
       - LIB_PATH=/app/src/libvector.so
-      - FAST_NPROBE=8
-      - FULL_NPROBE=24
+      - FAST_NPROBE=32
+      - FULL_NPROBE=128
       - WORKERS=1
       - SOCK_PATH=/sockets/api2.sock
       - WARMUP=500
