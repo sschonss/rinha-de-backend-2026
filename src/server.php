@@ -23,6 +23,8 @@ if ($sockPath) {
 
 $server->set([
     'worker_num'        => $workers,
+    'reactor_num'       => 1,
+    'enable_coroutine'  => false,
     'dispatch_mode'     => 1,
     'open_tcp_nodelay'  => true,
     'log_level'         => SWOOLE_LOG_WARNING,
@@ -31,18 +33,22 @@ $server->set([
 
 $ready = false;
 
-$server->on('workerStart', function ($server, $workerId)
-    use ($indexPath, $libPath, $fastNprobe, $fullNprobe, $warmup, &$ready) {
+try {
+    VectorSearch::init($indexPath, $libPath, $fastNprobe, $fullNprobe);
+    echo "[master] index loaded (fast=$fastNprobe full=$fullNprobe)\n";
+} catch (\Throwable $e) {
+    echo "[master] index load FAILED: {$e->getMessage()}\n";
+}
+
+$server->on('workerStart', function ($server, $workerId) use ($warmup, &$ready) {
     try {
-        VectorSearch::init($indexPath, $libPath, $fastNprobe, $fullNprobe);
         if ($warmup > 0) {
             VectorSearch::warmup($warmup);
         }
         $ready = true;
         @file_put_contents('/tmp/ready', '1');
-        echo "[worker $workerId] ready (fast=$fastNprobe full=$fullNprobe warmup=$warmup)\n";
+        echo "[worker $workerId] ready (warmup=$warmup)\n";
     } catch (\Throwable $e) {
-        // Serve safe defaults so /ready still flips and load balancer doesn't 503 the whole test.
         $ready = true;
         @file_put_contents('/tmp/ready', '1');
         echo "[worker $workerId] DEGRADED: {$e->getMessage()}\n";

@@ -42,7 +42,7 @@ RUN docker-php-ext-install ffi
 # FFI + opcache (JIT disabled — Swoole installs opcode handlers, JIT can't run)
 RUN { \
       echo "ffi.enable=true"; \
-      echo "memory_limit=96M"; \
+      echo "memory_limit=32M"; \
       echo "opcache.enable=1"; \
       echo "opcache.enable_cli=1"; \
       echo "opcache.memory_consumption=24"; \
