@@ -29,7 +29,8 @@ import numpy as np
 from sklearn.cluster import MiniBatchKMeans
 
 QUANT_SCALE = 10000.0
-PAD_SENTINEL = 32767  # int16 max — far from any real (clamped 0..1) query
+PAD_SENTINEL = 0       # safe value (no int32 overflow during squared-distance accumulation)
+PAD_LABEL = 255        # sentinel label for padding slots (skipped at search time)
 DIMS = 14
 
 
@@ -110,7 +111,7 @@ def main():
             pad = padded_n - m
             pad_v = np.full((pad, DIMS), PAD_SENTINEL, dtype=np.int16)
             cluster_vecs = np.concatenate([cluster_vecs, pad_v], axis=0)
-            pad_l = np.zeros(pad, dtype=np.uint8)
+            pad_l = np.full(pad, PAD_LABEL, dtype=np.uint8)
             cluster_labs = np.concatenate([cluster_labs, pad_l], axis=0)
 
         # reshape to (n_blocks, 8, 14) then transpose dims to (n_blocks, 14, 8)

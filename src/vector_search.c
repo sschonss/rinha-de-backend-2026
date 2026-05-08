@@ -291,6 +291,7 @@ static int knn_count_fraud(const __m256i *q_lanes, const int *probe_ids, int npr
             uint32_t base = b * BLOCK_VECS;
             for (int s = 0; s < BLOCK_VECS; s++) {
                 if (dists[s] == INT32_MAX) continue;
+                if (g_idx.labels[base + s] == 0xFF) continue;  // padding sentinel
                 heap_push(heap, &hn, K_NEIGHBORS, dists[s], base + s);
                 if (hn == K_NEIGHBORS) worst = heap[0].dist;
             }
