@@ -14,4 +14,8 @@ int  ivf_fraud_score(
     int unknown_merchant, int hour, int dow,
     int has_last_tx, float minutes_since_last, float km_from_last);
 
+// All-in-C scoring: parse JSON request body, compute features, run KNN.
+// Returns fraud count (0..5).
+int  ivf_score_json(const char *json, int len);
+
 #endif

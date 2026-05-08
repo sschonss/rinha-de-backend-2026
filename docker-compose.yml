@@ -1,5 +1,5 @@
 x-api-common: &api-common
-  image: sschonss/rinha-api-2026:v12
+  image: sschonss/rinha-api-2026:v13
   platform: linux/amd64
   volumes:
     - rinha-sockets:/sockets

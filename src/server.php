@@ -66,15 +66,11 @@ $server->on('request', function (Swoole\Http\Request $req, Swoole\Http\Response 
 
     if ($uri === '/fraud-score' && $req->server['request_method'] === 'POST') {
         try {
-            $data = json_decode($req->rawContent(), true);
-            if (!$data) {
-                $res->header('Content-Type', 'application/json');
-                $res->end(FraudDetector::RESPONSES[0]);
-                return;
-            }
-            $json = FraudDetector::scoreToJson($data);
+            $body = $req->rawContent();
+            $count = VectorSearch::scoreJson($body);
+            if ($count < 0 || $count > 5) $count = 0;
             $res->header('Content-Type', 'application/json');
-            $res->end($json);
+            $res->end(FraudDetector::RESPONSES[$count]);
         } catch (\Throwable $e) {
             $res->header('Content-Type', 'application/json');
             $res->end(FraudDetector::RESPONSES[0]);

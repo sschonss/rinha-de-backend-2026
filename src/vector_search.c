@@ -415,3 +415,203 @@ int ivf_warmup(int n_queries) {
     }
     return sink;  // prevent dead-code elimination
 }
+
+// ============================================================
+// In-C JSON parser + scoring (eliminates PHP per-request overhead)
+// ============================================================
+
+#include <ctype.h>
+
+// Find first occurrence of "key": within [s, e). Returns ptr to value's first char,
+// or NULL. Skips whitespace/colon between key and value. Exact key match (boundary on quotes).
+static const char *jp_find_key(const char *s, const char *e, const char *key, size_t klen) {
+    if (!s || !e || s >= e) return NULL;
+    const char *limit = e - klen - 2;
+    for (; s < limit; s++) {
+        if (*s != '"') continue;
+        if (memcmp(s + 1, key, klen) != 0) continue;
+        if (s[klen + 1] != '"') continue;
+        const char *p = s + klen + 2;
+        while (p < e && (*p == ':' || *p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
+        return p;
+    }
+    return NULL;
+}
+
+// Find object value bounds for "key": { ... }. Returns 1 on success.
+static int jp_find_obj(const char *s, const char *e, const char *key, size_t klen,
+                       const char **out_start, const char **out_end) {
+    const char *p = jp_find_key(s, e, key, klen);
+    if (!p || *p != '{') return 0;
+    int depth = 0;
+    const char *q = p;
+    for (; q < e; q++) {
+        if (*q == '"') {
+            q++;
+            while (q < e && *q != '"') { if (*q == '\\' && q + 1 < e) q++; q++; }
+        } else if (*q == '{') depth++;
+        else if (*q == '}') { if (--depth == 0) { q++; break; } }
+    }
+    *out_start = p;
+    *out_end = q;
+    return 1;
+}
+
+// Find array value bounds for "key": [ ... ]. Returns 1 on success.
+static int jp_find_arr(const char *s, const char *e, const char *key, size_t klen,
+                       const char **out_start, const char **out_end) {
+    const char *p = jp_find_key(s, e, key, klen);
+    if (!p || *p != '[') return 0;
+    int depth = 0;
+    const char *q = p;
+    for (; q < e; q++) {
+        if (*q == '"') {
+            q++;
+            while (q < e && *q != '"') { if (*q == '\\' && q + 1 < e) q++; q++; }
+        } else if (*q == '[') depth++;
+        else if (*q == ']') { if (--depth == 0) { q++; break; } }
+    }
+    *out_start = p;
+    *out_end = q;
+    return 1;
+}
+
+static double mcc_risk_lookup_q(const char *p) {
+    // p points to opening quote of "NNNN"
+    if (!p || *p != '"') return 0.5;
+    const char *s = p + 1;
+    int mcc = 0;
+    for (int i = 0; i < 6 && s[i] >= '0' && s[i] <= '9'; i++) mcc = mcc * 10 + (s[i] - '0');
+    switch (mcc) {
+        case 5411: return 0.15;
+        case 5812: return 0.30;
+        case 5912: return 0.20;
+        case 5944: return 0.45;
+        case 7801: return 0.80;
+        case 7802: return 0.75;
+        case 7995: return 0.85;
+        case 4511: return 0.35;
+        case 5311: return 0.25;
+        case 5999: return 0.50;
+        default:   return 0.50;
+    }
+}
+
+// Parse "YYYY-MM-DDTHH:MM:SSZ" -> epoch seconds (UTC).
+static int64_t parse_iso8601_z(const char *s) {
+    int y  = (s[0]-'0')*1000 + (s[1]-'0')*100 + (s[2]-'0')*10 + (s[3]-'0');
+    int mo = (s[5]-'0')*10 + (s[6]-'0');
+    int d  = (s[8]-'0')*10 + (s[9]-'0');
+    int h  = (s[11]-'0')*10 + (s[12]-'0');
+    int mi = (s[14]-'0')*10 + (s[15]-'0');
+    int se = (s[17]-'0')*10 + (s[18]-'0');
+    // Howard Hinnant's days_from_civil
+    int yy = y - (mo <= 2);
+    int era = (yy >= 0 ? yy : yy - 399) / 400;
+    unsigned yoe = (unsigned)(yy - era * 400);
+    unsigned doy = (153u * (unsigned)(mo + (mo > 2 ? -3 : 9)) + 2u) / 5u + (unsigned)d - 1u;
+    unsigned doe = yoe * 365u + yoe / 4u - yoe / 100u + doy;
+    int64_t days = (int64_t)era * 146097 + (int64_t)doe - 719468;
+    return days * 86400 + (int64_t)h * 3600 + (int64_t)mi * 60 + (int64_t)se;
+}
+
+// Find merchant.id within known_merchants array. Returns 1 if NOT found (unknown).
+static int jp_unknown_merchant(const char *mid, size_t mid_len,
+                                const char *arr_s, const char *arr_e) {
+    if (!mid || mid_len == 0 || !arr_s || arr_s + 1 >= arr_e) return 1;
+    const char *limit = arr_e - mid_len - 1;
+    for (const char *p = arr_s + 1; p < limit; p++) {
+        if (*p == '"' && memcmp(p + 1, mid, mid_len) == 0 && p[1 + mid_len] == '"') {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+int ivf_score_json(const char *json, int len) {
+    if (!g_idx.centroids || !json || len < 50) return 0;
+    const char *s = json;
+    const char *e = json + len;
+
+    const char *tx_s = NULL, *tx_e = NULL;
+    const char *cust_s = NULL, *cust_e = NULL;
+    const char *mer_s = NULL, *mer_e = NULL;
+    const char *term_s = NULL, *term_e = NULL;
+
+    if (!jp_find_obj(s, e, "transaction", 11, &tx_s, &tx_e)) return 0;
+    if (!jp_find_obj(s, e, "customer",     8, &cust_s, &cust_e)) return 0;
+    if (!jp_find_obj(s, e, "merchant",     8, &mer_s, &mer_e)) return 0;
+    if (!jp_find_obj(s, e, "terminal",     8, &term_s, &term_e)) return 0;
+
+    // transaction
+    const char *p_amt = jp_find_key(tx_s, tx_e, "amount", 6);
+    float amount = p_amt ? (float)strtod(p_amt, NULL) : 0.0f;
+
+    const char *p_inst = jp_find_key(tx_s, tx_e, "installments", 12);
+    int installments = p_inst ? (int)strtol(p_inst, NULL, 10) : 1;
+
+    const char *p_req = jp_find_key(tx_s, tx_e, "requested_at", 12);
+    if (!p_req || *p_req != '"') return 0;
+    int64_t cur_ts = parse_iso8601_z(p_req + 1);
+    int hour = (int)(((cur_ts % 86400) + 86400) % 86400) / 3600;
+    int64_t days_floor = cur_ts >= 0 ? cur_ts / 86400 : -((-cur_ts + 86399) / 86400);
+    // 1970-01-01 = Thursday. PHP gmdate('N')-1 gives Mon=0..Sun=6
+    int dow = (int)(((days_floor + 3) % 7 + 7) % 7);
+
+    // customer
+    const char *p_cavg = jp_find_key(cust_s, cust_e, "avg_amount", 10);
+    float cust_avg = p_cavg ? (float)strtod(p_cavg, NULL) : 0.0f;
+
+    const char *p_tx24 = jp_find_key(cust_s, cust_e, "tx_count_24h", 12);
+    int tx_count_24h = p_tx24 ? (int)strtol(p_tx24, NULL, 10) : 0;
+
+    const char *km_s = NULL, *km_e = NULL;
+    jp_find_arr(cust_s, cust_e, "known_merchants", 15, &km_s, &km_e);
+
+    // merchant
+    const char *p_mid = jp_find_key(mer_s, mer_e, "id", 2);
+    const char *mid_str = NULL; size_t mid_len = 0;
+    if (p_mid && *p_mid == '"') {
+        mid_str = p_mid + 1;
+        const char *q = mid_str;
+        while (q < mer_e && *q != '"') q++;
+        mid_len = (size_t)(q - mid_str);
+    }
+    const char *p_mcc = jp_find_key(mer_s, mer_e, "mcc", 3);
+    double mcc_risk = mcc_risk_lookup_q(p_mcc);
+    const char *p_mavg = jp_find_key(mer_s, mer_e, "avg_amount", 10);
+    float merch_avg = p_mavg ? (float)strtod(p_mavg, NULL) : 0.0f;
+    int unknown = (km_s && mid_str) ? jp_unknown_merchant(mid_str, mid_len, km_s, km_e) : 1;
+
+    // terminal
+    const char *p_io = jp_find_key(term_s, term_e, "is_online", 9);
+    int is_online = (p_io && *p_io == 't') ? 1 : 0;
+    const char *p_cp = jp_find_key(term_s, term_e, "card_present", 12);
+    int card_present = (p_cp && *p_cp == 't') ? 1 : 0;
+    const char *p_kmh = jp_find_key(term_s, term_e, "km_from_home", 12);
+    float km_home = p_kmh ? (float)strtod(p_kmh, NULL) : 0.0f;
+
+    // last_transaction (object or null)
+    int has_last = 0;
+    float minutes_since_last = 0.0f, km_from_last = 0.0f;
+    const char *p_lt = jp_find_key(s, e, "last_transaction", 16);
+    if (p_lt && *p_lt == '{') {
+        const char *lt_s, *lt_e;
+        if (jp_find_obj(s, e, "last_transaction", 16, &lt_s, &lt_e)) {
+            const char *p_ts = jp_find_key(lt_s, lt_e, "timestamp", 9);
+            const char *p_kf = jp_find_key(lt_s, lt_e, "km_from_current", 15);
+            if (p_ts && *p_ts == '"' && p_kf) {
+                int64_t last_ts = parse_iso8601_z(p_ts + 1);
+                minutes_since_last = (float)((double)(cur_ts - last_ts) / 60.0);
+                km_from_last = (float)strtod(p_kf, NULL);
+                has_last = 1;
+            }
+        }
+    }
+
+    return ivf_fraud_score(
+        amount, installments, cust_avg,
+        tx_count_24h, merch_avg, (float)mcc_risk,
+        km_home, is_online, card_present, unknown,
+        hour, dow, has_last, minutes_since_last, km_from_last);
+}

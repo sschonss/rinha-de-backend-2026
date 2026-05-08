@@ -22,6 +22,7 @@ class VectorSearch
                 float km_home, int is_online, int card_present,
                 int unknown_merchant, int hour, int dow,
                 int has_last_tx, float minutes_since_last, float km_from_last);
+            int ivf_score_json(const char *json, int len);
         ", $libPath);
 
         $rc = self::$ffi->ivf_init($indexPath, $fastNprobe, $fullNprobe);
@@ -52,6 +53,11 @@ class VectorSearch
             $unknownMerchant, $hour, $dow,
             $hasLastTx, $minutesSinceLast, $kmFromLast
         );
+    }
+
+    public static function scoreJson(string $json): int
+    {
+        return self::$ffi->ivf_score_json($json, strlen($json));
     }
 
     public static function destroy(): void
