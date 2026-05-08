@@ -4,22 +4,26 @@ date_default_timezone_set('UTC');
 require_once __DIR__ . '/FraudDetector.php';
 require_once __DIR__ . '/VectorSearch.php';
 
-$indexDir = getenv('INDEX_DIR') ?: '/data/index';
-$libPath  = getenv('LIB_PATH') ?: __DIR__ . '/libvector.so';
-$nprobe   = (int)(getenv('NPROBE') ?: 10);
-$port     = (int)(getenv('PORT') ?: 9999);
-$sockPath = getenv('SOCK_PATH') ?: '';
-$workers  = (int)(getenv('WORKERS') ?: 2);
+$indexPath  = getenv('INDEX_PATH') ?: '/data/index.bin';
+$libPath    = getenv('LIB_PATH')   ?: __DIR__ . '/libvector.so';
+$fastNprobe = (int)(getenv('FAST_NPROBE') ?: 8);
+$fullNprobe = (int)(getenv('FULL_NPROBE') ?: 24);
+$port       = (int)(getenv('PORT') ?: 9999);
+$sockPath   = getenv('SOCK_PATH') ?: '';
+$workers    = (int)(getenv('WORKERS') ?: 1);
+$warmup     = (int)(getenv('WARMUP') ?: 500);
 
 if ($sockPath) {
-    $server = new Swoole\Http\Server("unix:$sockPath", 0, SWOOLE_PROCESS, SWOOLE_UNIX_STREAM);
+    if (file_exists($sockPath)) @unlink($sockPath);
+    umask(0);
+    $server = new Swoole\Http\Server($sockPath, 0, SWOOLE_BASE, SWOOLE_SOCK_UNIX_STREAM);
 } else {
     $server = new Swoole\Http\Server('0.0.0.0', $port);
 }
 
 $server->set([
     'worker_num'        => $workers,
-    'dispatch_mode'     => 1,       // round-robin to workers
+    'dispatch_mode'     => 1,
     'open_tcp_nodelay'  => true,
     'log_level'         => SWOOLE_LOG_WARNING,
     'log_file'          => '/dev/null',
@@ -27,51 +31,47 @@ $server->set([
 
 $ready = false;
 
-$server->on('workerStart', function ($server, $workerId) use ($indexDir, $libPath, $nprobe, &$ready) {
+$server->on('workerStart', function ($server, $workerId)
+    use ($indexPath, $libPath, $fastNprobe, $fullNprobe, $warmup, &$ready) {
     try {
-        VectorSearch::init($indexDir, $libPath, $nprobe);
+        VectorSearch::init($indexPath, $libPath, $fastNprobe, $fullNprobe);
+        if ($warmup > 0) {
+            VectorSearch::warmup($warmup);
+        }
         $ready = true;
         @file_put_contents('/tmp/ready', '1');
-        echo "[worker $workerId] IVF index loaded. Ready.\n";
+        echo "[worker $workerId] ready (fast=$fastNprobe full=$fullNprobe warmup=$warmup)\n";
     } catch (\Throwable $e) {
-        // Index load failed (e.g., low memory backup instance) — serve safe defaults
+        // Serve safe defaults so /ready still flips and load balancer doesn't 503 the whole test.
         $ready = true;
         @file_put_contents('/tmp/ready', '1');
-        echo "[worker $workerId] Index unavailable, serving defaults: {$e->getMessage()}\n";
+        echo "[worker $workerId] DEGRADED: {$e->getMessage()}\n";
     }
 });
 
 $server->on('request', function (Swoole\Http\Request $req, Swoole\Http\Response $res) use (&$ready) {
     $uri = $req->server['request_uri'];
 
-    // GET /ready
     if ($uri === '/ready') {
-        if ($ready) {
-            $res->status(200);
-            $res->end('OK');
-        } else {
-            $res->status(503);
-            $res->end('NOT READY');
-        }
+        if ($ready) { $res->status(200); $res->end('OK'); }
+        else        { $res->status(503); $res->end('NOT READY'); }
         return;
     }
 
-    // POST /fraud-score
     if ($uri === '/fraud-score' && $req->server['request_method'] === 'POST') {
         try {
             $data = json_decode($req->rawContent(), true);
             if (!$data) {
                 $res->header('Content-Type', 'application/json');
-                $res->end('{"approved":true,"fraud_score":0}');
+                $res->end(FraudDetector::RESPONSES[0]);
                 return;
             }
             $json = FraudDetector::scoreToJson($data);
             $res->header('Content-Type', 'application/json');
             $res->end($json);
         } catch (\Throwable $e) {
-            // Any error — fallback to avoid HTTP 500 (weight=5 in scoring)
             $res->header('Content-Type', 'application/json');
-            $res->end('{"approved":true,"fraud_score":0.0}');
+            $res->end(FraudDetector::RESPONSES[0]);
         }
         return;
     }
@@ -81,8 +81,8 @@ $server->on('request', function (Swoole\Http\Request $req, Swoole\Http\Response 
 });
 
 if ($sockPath) {
-    echo "Starting Swoole server on unix:$sockPath with $workers workers...\n";
+    echo "Starting Swoole on unix:$sockPath ($workers workers)\n";
 } else {
-    echo "Starting Swoole server on port $port with $workers workers...\n";
+    echo "Starting Swoole on :$port ($workers workers)\n";
 }
 $server->start();

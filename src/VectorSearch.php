@@ -5,16 +5,17 @@ class VectorSearch
     private static ?\FFI $ffi = null;
     private static bool $initialized = false;
 
-    public static function init(string $indexDir, string $libPath = null, int $nprobe = 10): void
+    public static function init(string $indexPath, ?string $libPath = null,
+                                int $fastNprobe = 8, int $fullNprobe = 24): void
     {
         if (self::$initialized) return;
 
-        $libPath = $libPath ?? __DIR__ . '/libvector.so';
+        $libPath ??= __DIR__ . '/libvector.so';
 
         self::$ffi = \FFI::cdef("
-            int ivf_init(const char *index_dir, int nprobe);
-            int ivf_search(const float *query, int *out_labels, float *out_distances, int k);
+            int ivf_init(const char *index_path, int fast_nprobe, int full_nprobe);
             void ivf_destroy(void);
+            int ivf_warmup(int n_queries);
             int ivf_fraud_score(
                 float amount, int installments, float cust_avg,
                 int tx_count_24h, float merch_avg, float mcc_risk,
@@ -23,18 +24,20 @@ class VectorSearch
                 int has_last_tx, float minutes_since_last, float km_from_last);
         ", $libPath);
 
-        $result = self::$ffi->ivf_init($indexDir, $nprobe);
-        if ($result !== 0) {
-            throw new \RuntimeException("Failed to initialize IVF index from $indexDir");
+        $rc = self::$ffi->ivf_init($indexPath, $fastNprobe, $fullNprobe);
+        if ($rc !== 0) {
+            throw new \RuntimeException("ivf_init failed for $indexPath");
         }
-
         self::$initialized = true;
     }
 
-    /**
-     * Combined vectorize+search+count in a single FFI call.
-     * Returns fraud_count (0-5).
-     */
+    public static function warmup(int $n): void
+    {
+        if (self::$ffi) {
+            self::$ffi->ivf_warmup($n);
+        }
+    }
+
     public static function scoreDirect(
         float $amount, int $installments, float $custAvg,
         int $txCount24h, float $merchAvg, float $mccRisk,

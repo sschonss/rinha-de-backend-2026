@@ -1,30 +1,48 @@
 #!/usr/bin/env python3
 """
-Builds an IVF (Inverted File Index) from references.json.gz.
+Builds an IVF1 index from references.json.gz.
 
-Reads 3M labeled vectors, clusters them via MiniBatchKMeans,
-and outputs binary files for mmap-based loading at runtime.
+Output: single binary file `index.bin` with layout:
 
-Output files:
-  - centroids.bin   : float32[n_clusters × 14] — cluster centroids
-  - vectors.bin     : float32[n_vectors × 14]  — vectors sorted by cluster
-  - labels.bin      : uint8[n_vectors]          — labels sorted by cluster (0=legit, 1=fraud)
-  - offsets.bin      : uint32[n_clusters × 2]   — (start_index, count) per cluster
-  - meta.bin        : uint32[3]                 — (n_vectors, n_clusters, n_dims)
+    [4]   magic "IVF1"
+    [4]   n          (u32) original vector count
+    [4]   k          (u32) number of clusters
+    [4]   d          (u32) dimensions (14)
+    [4]   total_blocks (u32) total 8-vector blocks
+    [k*d*4]            centroids       (f32, row-major: k x d)
+    [(k+1)*4]          block_offsets   (u32, per cluster, +1 sentinel)
+    [total_blocks*8]   labels          (u8, padded with 0)
+    [total_blocks*14*8*2] blocks       (i16, dim-major: each block = d x 8)
+
+Quantization: i16(v) = round(v * 10000), clamped to int16 range.
+Padding: each cluster's vectors padded to multiple of 8. Padded slots get
+label=0 and quantized vector = 32767 (very far from any real query in q-space).
 """
-import json
 import gzip
+import json
+import os
 import struct
 import sys
-import os
 import time
+
 import numpy as np
 from sklearn.cluster import MiniBatchKMeans
+
+QUANT_SCALE = 10000.0
+PAD_SENTINEL = 32767  # int16 max — far from any real (clamped 0..1) query
+DIMS = 14
+
+
+def quantize(vecs: np.ndarray) -> np.ndarray:
+    q = np.rint(vecs * QUANT_SCALE)
+    q = np.clip(q, -32768, 32767)
+    return q.astype(np.int16)
+
 
 def main():
     input_path = sys.argv[1] if len(sys.argv) > 1 else 'resources/references.json.gz'
     output_dir = sys.argv[2] if len(sys.argv) > 2 else 'data'
-    n_clusters = int(sys.argv[3]) if len(sys.argv) > 3 else 1500
+    n_clusters = int(sys.argv[3]) if len(sys.argv) > 3 else 4096
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -38,67 +56,94 @@ def main():
             data = json.load(f)
     print(f"  Loaded {len(data)} records in {time.time()-t0:.1f}s")
 
-    print("Converting to numpy arrays...")
     vectors = np.array([d['vector'] for d in data], dtype=np.float32)
     labels = np.array([1 if d['label'] == 'fraud' else 0 for d in data], dtype=np.uint8)
     n_vectors, n_dims = vectors.shape
-    print(f"  Shape: {vectors.shape}, labels: {labels.shape}")
-    print(f"  Fraud rate: {labels.sum()}/{n_vectors} ({100*labels.mean():.1f}%)")
+    assert n_dims == DIMS, f"expected {DIMS} dims, got {n_dims}"
+    print(f"  Shape: {vectors.shape}, fraud_rate={labels.mean()*100:.1f}%")
 
-    print(f"Running MiniBatchKMeans with {n_clusters} clusters...")
+    print(f"MiniBatchKMeans k={n_clusters}...")
     t0 = time.time()
-    kmeans = MiniBatchKMeans(
+    km = MiniBatchKMeans(
         n_clusters=n_clusters,
         batch_size=10000,
         n_init=3,
         max_iter=100,
         random_state=42,
     )
-    assignments = kmeans.fit_predict(vectors)
-    centroids = kmeans.cluster_centers_.astype(np.float32)
-    print(f"  Clustering done in {time.time()-t0:.1f}s")
+    assignments = km.fit_predict(vectors)
+    centroids = km.cluster_centers_.astype(np.float32)
+    print(f"  Done in {time.time()-t0:.1f}s")
 
-    print("Sorting vectors by cluster assignment...")
-    order = np.argsort(assignments)
+    print("Sorting by cluster...")
+    order = np.argsort(assignments, kind='stable')
     sorted_vectors = vectors[order]
     sorted_labels = labels[order]
     sorted_assignments = assignments[order]
 
-    print("Computing cluster offsets...")
-    offsets = np.zeros((n_clusters, 2), dtype=np.uint32)
+    qvecs = quantize(sorted_vectors)  # (n, 14) int16
+
+    # Per-cluster grouping with padding to multiple of 8
+    print("Grouping into 8-vector blocks...")
+    block_offsets = np.zeros(n_clusters + 1, dtype=np.uint32)
+    blocks_list = []   # each entry: (14,8) int16
+    labels_list = []   # each entry: (8,) uint8
+
+    cur = 0
     for c in range(n_clusters):
-        mask = sorted_assignments == c
-        indices = np.where(mask)[0]
-        if len(indices) > 0:
-            offsets[c, 0] = indices[0]
-            offsets[c, 1] = len(indices)
+        # find run of cluster c in sorted array (binary search)
+        start = np.searchsorted(sorted_assignments, c, side='left')
+        end = np.searchsorted(sorted_assignments, c, side='right')
+        cluster_vecs = qvecs[start:end]      # (m, 14)
+        cluster_labs = sorted_labels[start:end]  # (m,)
+        m = end - start
+        n_blocks = (m + 7) // 8
 
-    counts = offsets[:, 1]
-    print(f"  Cluster sizes: min={counts.min()}, max={counts.max()}, "
-          f"mean={counts.mean():.0f}, median={np.median(counts):.0f}")
-    print(f"  Empty clusters: {(counts == 0).sum()}")
+        block_offsets[c] = cur
+        cur += n_blocks
 
-    print(f"Writing binary files to {output_dir}/...")
+        if m == 0:
+            continue
+        # pad
+        padded_n = n_blocks * 8
+        if padded_n > m:
+            pad = padded_n - m
+            pad_v = np.full((pad, DIMS), PAD_SENTINEL, dtype=np.int16)
+            cluster_vecs = np.concatenate([cluster_vecs, pad_v], axis=0)
+            pad_l = np.zeros(pad, dtype=np.uint8)
+            cluster_labs = np.concatenate([cluster_labs, pad_l], axis=0)
 
-    centroids.tofile(os.path.join(output_dir, 'centroids.bin'))
-    print(f"  centroids.bin: {centroids.nbytes} bytes")
+        # reshape to (n_blocks, 8, 14) then transpose dims to (n_blocks, 14, 8)
+        bv = cluster_vecs.reshape(n_blocks, 8, DIMS).transpose(0, 2, 1).copy()
+        blocks_list.append(bv)
+        labels_list.append(cluster_labs)
 
-    sorted_vectors.tofile(os.path.join(output_dir, 'vectors.bin'))
-    print(f"  vectors.bin: {sorted_vectors.nbytes} bytes")
+    block_offsets[n_clusters] = cur
+    total_blocks = cur
 
-    sorted_labels.tofile(os.path.join(output_dir, 'labels.bin'))
-    print(f"  labels.bin: {sorted_labels.nbytes} bytes")
+    blocks_arr = np.concatenate(blocks_list, axis=0).astype(np.int16)
+    labels_arr = np.concatenate(labels_list, axis=0).astype(np.uint8)
+    print(f"  total_blocks={total_blocks}, padded_n={total_blocks*8}")
 
-    offsets.tofile(os.path.join(output_dir, 'offsets.bin'))
-    print(f"  offsets.bin: {offsets.nbytes} bytes")
+    # Write single index.bin
+    out_path = os.path.join(output_dir, 'index.bin')
+    print(f"Writing {out_path}...")
+    with open(out_path, 'wb') as f:
+        f.write(b'IVF1')
+        f.write(struct.pack('<IIII', n_vectors, n_clusters, DIMS, total_blocks))
+        f.write(centroids.tobytes())
+        f.write(block_offsets.tobytes())
+        f.write(labels_arr.tobytes())
+        f.write(blocks_arr.tobytes())
 
-    with open(os.path.join(output_dir, 'meta.bin'), 'wb') as f:
-        f.write(struct.pack('III', n_vectors, n_clusters, n_dims))
-    print(f"  meta.bin: 12 bytes")
-
-    total_size = centroids.nbytes + sorted_vectors.nbytes + sorted_labels.nbytes + offsets.nbytes + 12
-    print(f"\nTotal index size: {total_size / 1024 / 1024:.1f} MB")
+    sz = os.path.getsize(out_path)
+    print(f"\nindex.bin size: {sz/1024/1024:.1f} MB")
+    print(f"  centroids: {centroids.nbytes/1024/1024:.2f} MB")
+    print(f"  offsets:   {block_offsets.nbytes/1024:.1f} KB")
+    print(f"  labels:    {labels_arr.nbytes/1024/1024:.2f} MB")
+    print(f"  blocks:    {blocks_arr.nbytes/1024/1024:.2f} MB")
     print("Done!")
+
 
 if __name__ == '__main__':
     main()

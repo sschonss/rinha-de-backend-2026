@@ -3,15 +3,11 @@
 
 #include <stdint.h>
 
-#define IVF_DIMS 14
-#define IVF_K 5
-
-int ivf_init(const char *index_dir, int nprobe);
-int ivf_search(const float *query, int *out_labels, float *out_distances, int k);
+int  ivf_init(const char *index_path, int fast_nprobe, int full_nprobe);
 void ivf_destroy(void);
+int  ivf_warmup(int n_queries);
 
-// Combined: vectorize raw fields + search + count fraud labels → return fraud_count (0-5)
-int ivf_fraud_score(
+int  ivf_fraud_score(
     float amount, int installments, float cust_avg,
     int tx_count_24h, float merch_avg, float mcc_risk,
     float km_home, int is_online, int card_present,

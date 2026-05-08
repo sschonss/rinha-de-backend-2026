@@ -1,5 +1,5 @@
 x-api-common: &api-common
-  image: sschonss/rinha-api-2026:v9
+  image: sschonss/rinha-api-2026:v10
   platform: linux/amd64
   volumes:
     - rinha-sockets:/sockets
@@ -7,7 +7,7 @@ x-api-common: &api-common
     resources:
       limits:
         cpus: "0.40"
-        memory: "150MB"
+        memory: "165MB"
   networks:
     - rinha
   ulimits:
@@ -32,18 +32,20 @@ services:
       resources:
         limits:
           cpus: "0.20"
-          memory: "50MB"
+          memory: "20MB"
     networks:
       - rinha
 
   api-1:
     <<: *api-common
     environment:
-      - INDEX_DIR=/data/index
+      - INDEX_PATH=/data/index.bin
       - LIB_PATH=/app/src/libvector.so
-      - NPROBE=3
+      - FAST_NPROBE=8
+      - FULL_NPROBE=24
       - WORKERS=1
       - SOCK_PATH=/sockets/api1.sock
+      - WARMUP=500
     healthcheck:
       test: ["CMD", "test", "-f", "/tmp/ready"]
       interval: 500ms
@@ -54,11 +56,13 @@ services:
   api-2:
     <<: *api-common
     environment:
-      - INDEX_DIR=/data/index
+      - INDEX_PATH=/data/index.bin
       - LIB_PATH=/app/src/libvector.so
-      - NPROBE=3
+      - FAST_NPROBE=8
+      - FULL_NPROBE=24
       - WORKERS=1
       - SOCK_PATH=/sockets/api2.sock
+      - WARMUP=500
     healthcheck:
       test: ["CMD", "test", "-f", "/tmp/ready"]
       interval: 500ms
@@ -68,6 +72,9 @@ services:
 
 volumes:
   rinha-sockets:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
 
 networks:
   rinha:
