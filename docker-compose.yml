@@ -43,7 +43,7 @@ services:
       - LIB_PATH=/app/src/libvector.so
       - FAST_NPROBE=8
       - FULL_NPROBE=24
-      - WORKERS=4
+      - WORKERS=6
       - SOCK_PATH=/sockets/api1.sock
       - WARMUP=500
     healthcheck:
@@ -60,7 +60,7 @@ services:
       - LIB_PATH=/app/src/libvector.so
       - FAST_NPROBE=8
       - FULL_NPROBE=24
-      - WORKERS=4
+      - WORKERS=6
       - SOCK_PATH=/sockets/api2.sock
       - WARMUP=500
     healthcheck:
