@@ -125,8 +125,11 @@ static int try_handle(conn_t *c) {
 
 static void run_worker(int listen_fd) {
     int epfd = epoll_create1(EPOLL_CLOEXEC);
-    struct epoll_event ev = { .events = EPOLLIN, .data.u32 = 0xFFFFFFFFu };
-    epoll_ctl(epfd, EPOLL_CTL_ADD, listen_fd, &ev);
+    struct epoll_event ev = { .events = EPOLLIN | EPOLLEXCLUSIVE, .data.u32 = 0xFFFFFFFFu };
+    if (epoll_ctl(epfd, EPOLL_CTL_ADD, listen_fd, &ev) < 0) {
+        struct epoll_event ev2 = { .events = EPOLLIN, .data.u32 = 0xFFFFFFFFu };
+        epoll_ctl(epfd, EPOLL_CTL_ADD, listen_fd, &ev2);
+    }
 
     struct epoll_event events[256];
     for (;;) {
