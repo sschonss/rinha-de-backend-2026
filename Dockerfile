@@ -21,29 +21,17 @@ ARG N_CLUSTERS=4096
 RUN python build_index.py /resources/references.json.gz /index ${N_CLUSTERS}
 
 # ============================================================
-# Stage 3: Compile C vector search lib (AVX2 + FMA + LTO + PGO, target=haswell amd64)
+# Stage 3: Compile C vector search lib + bare HTTP server (AVX2 + FMA, haswell amd64)
 # ============================================================
 FROM --platform=linux/amd64 gcc:13-bookworm AS builder
 WORKDIR /build
-COPY src/vector_search.h src/vector_search.c src/pgo_trainer.c ./
-COPY --from=indexer /index/index.bin /data/index.bin
-
-# Pass 1: build instrumented .so (gcda will be keyed to libvector.so)
-RUN mkdir -p /tmp/pgo \
- && gcc -O3 -march=haswell -mavx2 -mfma -mbmi2 -mpopcnt \
-        -ffast-math -funroll-loops -fno-plt -flto \
-        -fprofile-generate=/tmp/pgo -fprofile-update=atomic \
-        -shared -fPIC -o libvector.so vector_search.c -lm \
- && gcc -O2 pgo_trainer.c -L. -lvector -Wl,-rpath,/build -o /tmp/trainer
-
-# Pass 2: run trainer; loads libvector.so → writes .gcda for that .so
-RUN LD_LIBRARY_PATH=/build /tmp/trainer /data/index.bin && ls /tmp/pgo
-
-# Pass 3: rebuild .so using profile (same output name → gcda matches)
+COPY src/vector_search.h src/vector_search.c src/server.c ./
 RUN gcc -O3 -march=haswell -mavx2 -mfma -mbmi2 -mpopcnt \
-        -ffast-math -funroll-loops -fno-plt -flto \
-        -fprofile-use=/tmp/pgo -fprofile-correction \
+        -ffast-math -funroll-loops -fno-plt \
         -shared -fPIC -o libvector.so vector_search.c -lm
+RUN gcc -O3 -march=haswell -mavx2 -mfma -mbmi2 -mpopcnt \
+        -ffast-math -funroll-loops -fno-plt \
+        -o server server.c -L. -lvector -Wl,-rpath,/app/src
 
 # ============================================================
 # Stage 4: Runtime — PHP 8.3 + Swoole 6.1.8 + FFI + opcache JIT (amd64)
@@ -74,20 +62,21 @@ WORKDIR /app
 # Single-file IVF1 index
 COPY --from=indexer /index/index.bin /data/index.bin
 
-# C shared library
+# C shared library + bare HTTP server binary
 COPY --from=builder /build/libvector.so /app/src/libvector.so
+COPY --from=builder /build/server       /app/src/server
 
-# PHP source
+# PHP source (kept for tooling / fallback; not used at runtime)
 COPY src/ /app/src/
 
 ENV INDEX_PATH=/data/index.bin
 ENV LIB_PATH=/app/src/libvector.so
 ENV FAST_NPROBE=8
 ENV FULL_NPROBE=24
-ENV WORKERS=1
+ENV WORKERS=4
 ENV WARMUP=500
 ENV PORT=9999
 
 EXPOSE 9999
 
-CMD ["php", "/app/src/server.php"]
+CMD ["/app/src/server"]
