@@ -25,7 +25,7 @@
 #define BLOCK_BYTES (DIMS*BLOCK_VECS*2)
 #define QUANT_SCALE 10000.0f
 #define PAD_SENTINEL_F  32767.0f
-#define MAX_NPROBE 64
+#define MAX_NPROBE 4096
 #define K_NEIGHBORS 5
 
 typedef struct {
@@ -158,9 +158,14 @@ static inline float dist_centroid(const float *restrict q, const float *restrict
 // ---------- top-N centroids (sorted insertion) ----------
 
 static int top_n_centroids(const float *q, int nprobe, int *out_ids) {
+    uint32_t k = g_idx.n_clusters;
+    // Fast path: if nprobe >= n_clusters, skip centroid distance + sort entirely.
+    if ((uint32_t)nprobe >= k) {
+        for (uint32_t c = 0; c < k; c++) out_ids[c] = (int)c;
+        return (int)k;
+    }
     float best_d[MAX_NPROBE];
     int n = 0;
-    uint32_t k = g_idx.n_clusters;
     for (uint32_t c = 0; c < k; c++) {
         float d = dist_centroid(q, g_idx.centroids + (size_t)c * DIMS);
         if (n < nprobe) {
