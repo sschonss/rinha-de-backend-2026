@@ -373,8 +373,8 @@ int ivf_fraud_score(
     int n = top_n_centroids(qf, g_idx.fast_nprobe, probes);
     int fast = knn_count_fraud(q_lanes, probes, n);
 
-    // Boundary fallback: if count is ambiguous (2 or 3), reprobe with full nprobe
-    if ((fast == 2 || fast == 3) && g_idx.full_nprobe > g_idx.fast_nprobe) {
+    // Boundary fallback: any count 1..4 reprobes (FAST may be small).
+    if ((fast >= 1 && fast <= 4) && g_idx.full_nprobe > g_idx.fast_nprobe) {
         n = top_n_centroids(qf, g_idx.full_nprobe, probes);
         return knn_count_fraud(q_lanes, probes, n);
     }

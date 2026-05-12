@@ -1,5 +1,5 @@
 x-api-common: &api-common
-  image: sschonss/rinha-api-2026:v20
+  image: sschonss/rinha-api-2026:v21
   platform: linux/amd64
   volumes:
     - rinha-sockets:/sockets
@@ -41,7 +41,7 @@ services:
     environment:
       - INDEX_PATH=/data/index.bin
       - LIB_PATH=/app/src/libvector.so
-      - FAST_NPROBE=32
+      - FAST_NPROBE=8
       - FULL_NPROBE=96
       - WORKERS=6
       - SOCK_PATH=/sockets/api1.sock
@@ -58,7 +58,7 @@ services:
     environment:
       - INDEX_PATH=/data/index.bin
       - LIB_PATH=/app/src/libvector.so
-      - FAST_NPROBE=32
+      - FAST_NPROBE=8
       - FULL_NPROBE=96
       - WORKERS=6
       - SOCK_PATH=/sockets/api2.sock
