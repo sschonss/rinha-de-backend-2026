@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-int  ivf_init(const char *index_path, int fast_nprobe, int full_nprobe);
+int  ivf_init(const char *index_path, int fast_nprobe, int mid_nprobe, int full_nprobe);
 void ivf_destroy(void);
 int  ivf_warmup(int n_queries);
 

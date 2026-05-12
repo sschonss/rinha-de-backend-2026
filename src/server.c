@@ -195,10 +195,12 @@ int main(void) {
     const char *sock_path  = getenv("SOCK_PATH");  if (!sock_path)  sock_path  = "/sockets/api.sock";
     const char *index_path = getenv("INDEX_PATH"); if (!index_path) index_path = "/data/index.bin";
     const char *e_fast = getenv("FAST_NPROBE");
+    const char *e_mid  = getenv("MID_NPROBE");
     const char *e_full = getenv("FULL_NPROBE");
     const char *e_work = getenv("WORKERS");
     const char *e_warm = getenv("WARMUP");
     int fast    = e_fast ? atoi(e_fast) : 8;
+    int mid     = e_mid  ? atoi(e_mid)  : 0;
     int full    = e_full ? atoi(e_full) : 24;
     int workers = e_work ? atoi(e_work) : 4;
     int warmup  = e_warm ? atoi(e_warm) : 500;
@@ -209,13 +211,13 @@ int main(void) {
     NF_LEN  = (int)strlen(NOT_FOUND);
     RDY_LEN = (int)strlen(READY_OK);
 
-    if (ivf_init(index_path, fast, full) != 0) {
+    if (ivf_init(index_path, fast, mid, full) != 0) {
         fprintf(stderr, "ivf_init failed for %s\n", index_path);
         return 1;
     }
     if (warmup > 0) ivf_warmup(warmup);
-    fprintf(stderr, "[master] index loaded fast=%d full=%d warmup=%d workers=%d\n",
-            fast, full, warmup, workers);
+    fprintf(stderr, "[master] index loaded fast=%d mid=%d full=%d warmup=%d workers=%d\n",
+            fast, mid, full, warmup, workers);
 
     unlink(sock_path);
     int lfd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);

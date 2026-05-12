@@ -13,7 +13,7 @@ class VectorSearch
         $libPath ??= __DIR__ . '/libvector.so';
 
         self::$ffi = \FFI::cdef("
-            int ivf_init(const char *index_path, int fast_nprobe, int full_nprobe);
+            int ivf_init(const char *index_path, int fast_nprobe, int mid_nprobe, int full_nprobe);
             void ivf_destroy(void);
             int ivf_warmup(int n_queries);
             int ivf_fraud_score(
@@ -25,7 +25,7 @@ class VectorSearch
             int ivf_score_json(const char *json, int len);
         ", $libPath);
 
-        $rc = self::$ffi->ivf_init($indexPath, $fastNprobe, $fullNprobe);
+        $rc = self::$ffi->ivf_init($indexPath, $fastNprobe, 0, $fullNprobe);
         if ($rc !== 0) {
             throw new \RuntimeException("ivf_init failed for $indexPath");
         }

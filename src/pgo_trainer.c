@@ -18,7 +18,7 @@ static const char *PAYLOADS[] = {
 
 int main(int argc, char **argv) {
     const char *path = (argc > 1) ? argv[1] : "/data/index.bin";
-    if (ivf_init(path, 8, 24) != 0) {
+    if (ivf_init(path, 8, 0, 24) != 0) {
         fprintf(stderr, "ivf_init failed\n");
         return 1;
     }

@@ -38,6 +38,7 @@ typedef struct {
     uint32_t  n_dims;
     uint32_t  total_blocks;
     int       fast_nprobe;
+    int       mid_nprobe;
     int       full_nprobe;
 } IVFIndex;
 
@@ -56,11 +57,13 @@ static int read_exact(int fd, void *buf, size_t n) {
     return 0;
 }
 
-int ivf_init(const char *index_path, int fast_nprobe, int full_nprobe) {
+int ivf_init(const char *index_path, int fast_nprobe, int mid_nprobe, int full_nprobe) {
     memset(&g_idx, 0, sizeof(g_idx));
     g_idx.fast_nprobe = fast_nprobe > 0 ? fast_nprobe : 8;
+    g_idx.mid_nprobe  = mid_nprobe  > 0 ? mid_nprobe  : 0;   // 0 disables MID tier
     g_idx.full_nprobe = full_nprobe > 0 ? full_nprobe : 24;
     if (g_idx.fast_nprobe > MAX_NPROBE) g_idx.fast_nprobe = MAX_NPROBE;
+    if (g_idx.mid_nprobe  > MAX_NPROBE) g_idx.mid_nprobe  = MAX_NPROBE;
     if (g_idx.full_nprobe > MAX_NPROBE) g_idx.full_nprobe = MAX_NPROBE;
 
     int fd = open(index_path, O_RDONLY);
@@ -87,9 +90,9 @@ int ivf_init(const char *index_path, int fast_nprobe, int full_nprobe) {
         return -1;
     }
 
-    fprintf(stderr, "[ivf] n=%u k=%u d=%u total_blocks=%u fast=%d full=%d\n",
+    fprintf(stderr, "[ivf] n=%u k=%u d=%u total_blocks=%u fast=%d mid=%d full=%d\n",
             g_idx.n_vectors, g_idx.n_clusters, g_idx.n_dims, g_idx.total_blocks,
-            g_idx.fast_nprobe, g_idx.full_nprobe);
+            g_idx.fast_nprobe, g_idx.mid_nprobe, g_idx.full_nprobe);
 
     size_t cent_bytes   = (size_t)g_idx.n_clusters * DIMS * sizeof(float);
     size_t off_bytes    = (size_t)(g_idx.n_clusters + 1) * sizeof(uint32_t);
@@ -373,8 +376,16 @@ int ivf_fraud_score(
     int n = top_n_centroids(qf, g_idx.fast_nprobe, probes);
     int fast = knn_count_fraud(q_lanes, probes, n);
 
-    // Boundary fallback: any count 1..4 reprobes (FAST may be small).
+    // Two-tier fallback to recover detection without paying FULL on every ambiguous query.
+    // FAST=8 settles most queries. MID=24 settles clearer-but-ambiguous cases cheaply.
+    // FULL=full_nprobe (typically 96) only fires for stubborn cases (rare).
     if ((fast >= 1 && fast <= 4) && g_idx.full_nprobe > g_idx.fast_nprobe) {
+        int mid_np = g_idx.mid_nprobe;
+        if (mid_np > g_idx.fast_nprobe && mid_np < g_idx.full_nprobe) {
+            n = top_n_centroids(qf, mid_np, probes);
+            int mid = knn_count_fraud(q_lanes, probes, n);
+            if (!(mid >= 1 && mid <= 4)) return mid;
+        }
         n = top_n_centroids(qf, g_idx.full_nprobe, probes);
         return knn_count_fraud(q_lanes, probes, n);
     }
